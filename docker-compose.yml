@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: insurance-postgres
+    environment:
+      POSTGRES_USER: insurance
+      POSTGRES_PASSWORD: insurance123
+      POSTGRES_INITDB_ARGS: "-c max_connections=200"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - insurance-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insurance"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  service-registry:
+    build:
+      context: ./service-registry
+      dockerfile: Dockerfile
+    ports:
+      - "8761:8761"
+    environment:
+      SPRING_APPLICATION_NAME: service-registry
+    networks:
+      - insurance-network
+
+  config-server:
+    build:
+      context: ./config-server
+      dockerfile: Dockerfile
+    ports:
+      - "8888:8888"
+    depends_on:
+      - service-registry
+    environment:
+      SPRING_APPLICATION_NAME: config-server
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
+    networks:
+      - insurance-network
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - service-registry
+    environment:
+      SPRING_APPLICATION_NAME: api-gateway
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
+    networks:
+      - insurance-network
+
+  policy-service:
+    build:
+      context: ./policy-service
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      service-registry:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: policy-service
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/policy_service
+      SPRING_DATASOURCE_USERNAME: insurance
+      SPRING_DATASOURCE_PASSWORD: insurance123
+    networks:
+      - insurance-network
+
+  claims-service:
+    build:
+      context: ./claims-service
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      service-registry:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: claims-service
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/claims_service
+      SPRING_DATASOURCE_USERNAME: insurance
+      SPRING_DATASOURCE_PASSWORD: insurance123
+    networks:
+      - insurance-network
+
+  customer-service:
+    build:
+      context: ./customer-service
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      service-registry:
+        condition: service_started
+    environment:
+      SPRING_APPLICATION_NAME: customer-service
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/customer_service
+      SPRING_DATASOURCE_USERNAME: insurance
+      SPRING_DATASOURCE_PASSWORD: insurance123
+    networks:
+      - insurance-network
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    ports:
+      - "8084:8084"
+    depends_on:
+      - service-registry
+    environment:
+      SPRING_APPLICATION_NAME: notification-service
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://service-registry:8761/eureka/
+    networks:
+      - insurance-network
+
+networks:
+  insurance-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
